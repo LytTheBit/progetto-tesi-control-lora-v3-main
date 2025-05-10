@@ -9,6 +9,7 @@ from PIL import Image, ImageFilter
 from datasets import load_dataset
 from torchvision import transforms
 from accelerate.logging import get_logger
+from datasets import load_dataset, DatasetDict #aggiunto da me
 
 
 logger = get_logger(__name__)
@@ -16,32 +17,31 @@ logger = get_logger(__name__)
 
 class TrainDataset(torch.utils.data.Dataset):
     def __init__(self, args, tokenizer):
-        args = copy.deepcopy(args)
-        args.dataset_name = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../data/sd-generated", "sd1_5_pair_data"))
-
-        self.args = args
+        # 1) Definiamo dove sta il dataset
+        self.data_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__),
+                         "../circle_data")
+        )
+        self.args = copy.deepcopy(args)
         self.tokenizer = tokenizer
-        
-        # Get the datasets: you can either provide your own training and evaluation files (see below)
-        # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
-        
-        # In distributed training, the load_dataset function guarantees that only one local process can concurrently
-        # download the dataset.
-        if args.dataset_name is not None:
-            # Downloading and loading a dataset from the hub.
-            dataset = load_dataset(
-                args.dataset_name,
-                args.dataset_config_name,
-                cache_dir=args.cache_dir,
-            )
-        else:
-            if args.train_data_dir is not None:
-                dataset = load_dataset(
-                    args.train_data_dir,
-                    cache_dir=args.cache_dir,
-                )
-            # See more about loading custom images at
-            # https://huggingface.co/docs/datasets/v2.0.0/en/dataset_script
+
+        # 2) Carichiamo il CSV locale
+        data_files = {"train": os.path.join(self.data_dir, "captions.csv")}
+        dataset = load_dataset("csv",
+                               data_files=data_files,
+                               cache_dir=self.args.cache_dir)
+
+        # 3) Aggiungiamo i path di image e guide
+        def add_images(ex):
+            ex["image"] = os.path.join(self.data_dir, "image", ex["file"])
+            ex["guide"] = os.path.join(self.data_dir, "guide", ex["file"])
+            return ex
+
+        dataset = dataset["train"].map(
+            add_images,
+            remove_columns=[],
+        )
+        dataset = DatasetDict({"train": dataset})
 
         # Preprocessing the datasets.
         # We need to tokenize inputs and targets.
