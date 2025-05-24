@@ -20,7 +20,7 @@ class TrainDataset(torch.utils.data.Dataset):
         # 1) Definiamo dove sta il dataset
         self.data_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__),
-                         "../circle_data")
+                         "../glasses_data")
         )
         self.args = copy.deepcopy(args)
         self.tokenizer = tokenizer
@@ -153,10 +153,10 @@ class TrainDataset(torch.utils.data.Dataset):
         random_code = np.random.randint(0, 5)
         if random_code == 0:
             res = 2 ** np.random.randint(3, int(np.log2(args.resolution)))
-            image = image.resize((res, res), resample=Image.Resampling.NEAREST)
+            image = image.resize((res, res), resample=Image.NEAREST)
         elif random_code == 1:
             res = 2 ** np.random.randint(3, int(np.log2(args.resolution)))
-            image = image.resize((res, res), resample=Image.Resampling.BILINEAR)
+            image = image.resize((res, res), resample=Image.BILINEAR)
         elif random_code == 2:
             image = image.filter(ImageFilter.GaussianBlur(radius = np.random.randint(5, 11)))
         elif random_code == 3:
@@ -166,7 +166,8 @@ class TrainDataset(torch.utils.data.Dataset):
             image = ((image + 1) * 127.5).clip(0, 255).astype(np.uint8)
             image = Image.fromarray(image)
         elif random_code == 4:
-            image = image.resize((args.resolution//2, args.resolution//2), resample=Image.Resampling.NEAREST)
+            image = image.resize((args.resolution//2, args.resolution//2), resample=Image.NEAREST)
+
 
         return image
         
