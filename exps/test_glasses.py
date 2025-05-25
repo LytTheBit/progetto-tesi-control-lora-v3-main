@@ -31,7 +31,7 @@ pipe.to("cuda")
 
 # 5) Pesi LoRA “bicchieri”
 lora_ckpt = os.path.join(
-    project_root, "out", "lora-glasses", "checkpoint-4000", "pytorch_lora_weights.safetensors"
+    project_root, "out", "lora-glasses", "checkpoint-5000", "pytorch_lora_weights.safetensors"
 )
 if not os.path.isfile(lora_ckpt):
     raise FileNotFoundError(f"LoRA checkpoint non trovato: {lora_ckpt}")
@@ -40,10 +40,10 @@ pipe.load_lora_weights(lora_ckpt)
 # 6) Guida Canny e prompt per un bicchiere
 # Sostituisci 'acqua-capri.png' con il file che vuoi testare
 guide = Image.open(os.path.join(
-    project_root, "glasses_data", "guide", "acqua-capri.png"
+    project_root, "glasses_data", "guide", "acqua-aurum.png"
 )).convert("RGB").resize((512, 512))
 
-prompt = "Bicchiere in vetro trasparente, design essenziale con pareti sottili e linee pulite; vista frontale, sfondo bianco uniforme"
+prompt = "A photorealistic, transparent blue glass tumbler sitting on a wooden table, soft natural light, sharp focus, white seamless background, 4K resolution."
 
 # 7) Generazione
 out_dir = os.path.join(project_root, "out", "test_glasses")
@@ -60,6 +60,6 @@ result = pipe(
 )
 
 # 8) Salvataggio
-out_path = os.path.join(out_dir, "Bicchiere_test_5.png")
+out_path = os.path.join(out_dir, "Bicchiere_test_2B.png")
 result.images[0].save(out_path)
 print(f"Immagine salvata in: {out_path}")
