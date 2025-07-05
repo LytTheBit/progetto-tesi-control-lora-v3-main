@@ -1,6 +1,8 @@
 import os, sys
 import torch
+import json
 from PIL import Image
+from datetime import datetime
 
 # 1) Root del repo
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -38,28 +40,69 @@ if not os.path.isfile(lora_ckpt):
 pipe.load_lora_weights(lora_ckpt)
 
 # 6) Guida Canny e prompt per un bicchiere
-# Sostituisci 'acqua-capri.png' con il file che vuoi testare
-guide = Image.open(os.path.join(
-    project_root, "glasses_data", "guide", "acqua-aurum.png"
-)).convert("RGB").resize((512, 512))
+guide_path = os.path.join(project_root, "glasses_data", "guide", "acqua-aurum.png")
+guide = Image.open(guide_path).convert("RGB").resize((512, 512))
 
-prompt = "A photorealistic, transparent blue glass tumbler sitting on a wooden table, soft natural light, sharp focus, white seamless background, 4K resolution."
+prompt = "transparent tapered drinking glass with curved silhouette and narrow base, isolated on white background, no shadows"
+negative_prompt = "deformed, distorted, sketch, blurry, cartoon, colored background"
+seed = 1234
+num_inference_steps = 250
+guidance_scale = 15.0
+controlnet_conditioning_scale = 1.5
 
 # 7) Generazione
 out_dir = os.path.join(project_root, "out", "test_glasses")
 os.makedirs(out_dir, exist_ok=True)
-gen = torch.Generator(device="cuda").manual_seed(1234)
+gen = torch.Generator(device="cuda").manual_seed(seed)
 
 result = pipe(
     prompt=prompt,
+    negative_prompt=negative_prompt,
     image=guide,
-    num_inference_steps=80,
-    guidance_scale=9.0,
-    controlnet_conditioning_scale=1.2,
+    num_inference_steps=num_inference_steps,
+    guidance_scale=guidance_scale,
+    controlnet_conditioning_scale=controlnet_conditioning_scale,
     generator=gen
 )
 
-# 8) Salvataggio
-out_path = os.path.join(out_dir, "Bicchiere_test_2B.png")
-result.images[0].save(out_path)
-print(f"Immagine salvata in: {out_path}")
+# 8) Salvataggio immagine + impostazioni con contatore incrementale
+
+def get_next_index(directory, prefix="bicchiere_", extension=".png"):
+    existing = [
+        fname for fname in os.listdir(directory)
+        if fname.startswith(prefix) and fname.endswith(extension)
+    ]
+    numbers = []
+    for fname in existing:
+        try:
+            number = int(fname.replace(prefix, "").replace(extension, ""))
+            numbers.append(number)
+        except ValueError:
+            continue
+    next_index = max(numbers, default=0) + 1
+    return f"{prefix}{next_index:04d}"
+
+# Genera nome univoco incrementale
+basename = get_next_index(out_dir)
+image_path = os.path.join(out_dir, f"{basename}.png")
+settings_path = os.path.join(out_dir, f"{basename}_settings.json")
+
+# Salva immagine
+result.images[0].save(image_path)
+
+# Salva impostazioni
+settings = {
+    "output_filename": f"{basename}.png",
+    "prompt": prompt,
+    "negative_prompt": negative_prompt,
+    "guide_image": guide_path,
+    "num_inference_steps": num_inference_steps,
+    "guidance_scale": guidance_scale,
+    "controlnet_conditioning_scale": controlnet_conditioning_scale,
+    "seed": seed
+}
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=4)
+
+print(f"Immagine salvata in: {image_path}")
+print(f"Impostazioni salvate in: {settings_path}")
