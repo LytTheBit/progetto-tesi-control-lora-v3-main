@@ -1,0 +1,10 @@
+{
+    "output_filename": "bicchiere_0007.png",
+    "prompt": "transparent tapered drinking blue glass with curved silhouette and narrow base, isolated on white background, no shadows",
+    "negative_prompt": "deformed, distorted, sketch, blurry, cartoon, colored background",
+    "guide_image": "/home/ubuntu/progetto-tesi-control-lora-v3-main/glasses_data/guide/acqua-aurum.png",
+    "num_inference_steps": 250,
+    "guidance_scale": 15.0,
+    "controlnet_conditioning_scale": 1.5,
+    "seed": 1234
+}

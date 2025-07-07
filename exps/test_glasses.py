@@ -43,12 +43,13 @@ pipe.load_lora_weights(lora_ckpt)
 guide_path = os.path.join(project_root, "glasses_data", "guide", "acqua-aurum.png")
 guide = Image.open(guide_path).convert("RGB").resize((512, 512))
 
-prompt = "transparent tapered drinking glass with curved silhouette and narrow base, isolated on white background, no shadows"
-negative_prompt = "deformed, distorted, sketch, blurry, cartoon, colored background"
+prompt = "realistic transparent glass tumbler with curved silhouette and narrow base, subtle pink tint, isolated on a clean white background, product photography style, studio lighting, sharp detail, no reflections"
+negative_prompt = "cartoon, sketch, distorted, colored background, reflections, ornate, decorative glass, textured sides, blurry, surreal"
 seed = 1234
-num_inference_steps = 250
-guidance_scale = 15.0
-controlnet_conditioning_scale = 1.5
+num_inference_steps = 250 # Numero di step della catena di denoising. Più è alto, più a lungo il modello "pulisce" l'immagine
+guidance_scale = 15.0 # Bilancia il peso tra il prompt testuale e la creatività del modello
+controlnet_conditioning_scale = 1.5 # Controlla quanto peso ha l’immagine guida fornita al ControlNet.
+
 
 # 7) Generazione
 out_dir = os.path.join(project_root, "out", "test_glasses")
