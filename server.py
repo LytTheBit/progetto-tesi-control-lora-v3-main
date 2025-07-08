@@ -41,12 +41,14 @@ app = FastAPI()
 async def generate(request: Request):
     data = await request.json()
     prompt = data.get("prompt")
+    negative_prompt = "cartoon, sketch, distorted, colored background, reflections, ornate, decorative glass, textured sides, blurry, surreal" # prompo negativi non modificabili dal utente
     canny_data = base64.b64decode(data.get("canny").split(",")[1])
     guide = Image.open(io.BytesIO(canny_data)).convert("RGB").resize((512, 512))
     gen = torch.Generator(device="cuda").manual_seed(1234)
 
     result = pipe(
         prompt=prompt,
+        negative_prompt=negative_prompt, # prompo negativi non modificabili dal utente
         image=guide,
         num_inference_steps=int(data.get("num_inference_steps", 80)),
         guidance_scale=float(data.get("guidance_scale", 9.0)),
