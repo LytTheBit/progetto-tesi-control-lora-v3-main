@@ -3,7 +3,7 @@ import os
 import io
 import base64
 import torch
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from PIL import Image
 
 # 1. Imposta il path corretto per importare il codice esistente
@@ -19,7 +19,9 @@ from diffusers import UniPCMultistepScheduler
 
 # 3. Setup pipeline come in test_glasses.py
 unet = UNet2DConditionModelEx.from_pretrained(
-    "runwayml/stable-diffusion-v1-5", subfolder="unet", torch_dtype=torch.float16
+    "runwayml/stable-diffusion-v1-5",
+    subfolder="unet",
+    torch_dtype=torch.float16
 ).add_extra_conditions(["canny"])
 
 pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
@@ -31,34 +33,71 @@ pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 pipe.to("cuda")
 
-lora_ckpt = os.path.join(project_root, "out", "lora-glasses", "checkpoint-5000", "pytorch_lora_weights.safetensors")
+lora_ckpt = os.path.join(
+    project_root,
+    "out", "lora-glasses", "checkpoint-5000", "pytorch_lora_weights.safetensors"
+)
 pipe.load_lora_weights(lora_ckpt)
 
-# 4. FastAPI
+# 4. FastAPI app
 app = FastAPI()
 
 @app.post("/generate")
 async def generate(request: Request):
     data = await request.json()
-    prompt = data.get("prompt")
-    negative_prompt = "cartoon, sketch, distorted, colored background, reflections, ornate, decorative glass, textured sides, blurry, surreal" # prompo negativi non modificabili dal utente
-    canny_data = base64.b64decode(data.get("canny").split(",")[1])
-    guide = Image.open(io.BytesIO(canny_data)).convert("RGB").resize((512, 512))
+
+    # Estrai i prompt
+    prompt = data.get("prompt", "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt mancante")
+
+    negative_prompt = data.get(
+        "negative_prompt",
+        "cartoon, sketch, distorted, colored background, reflections, ornate, decorative glass, textured sides, blurry, surreal"
+    ).strip()
+
+    # Estrai e decodifica il Canny
+    canny_data = data.get("canny", "")
+    if not isinstance(canny_data, str) or not canny_data.startswith("data:image"):
+        raise HTTPException(status_code=400, detail="Formato Canny non valido")
+    try:
+        header, body = canny_data.split(",", 1)
+        canny_bytes = base64.b64decode(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Errore decodifica Canny")
+
+    # Prepara l'immagine per ControlNet
+    guide = Image.open(io.BytesIO(canny_bytes)).convert("RGB").resize((512, 512))
+
+    # Parametri numerici con default
+    try:
+        steps      = int( data.get("num_inference_steps", 80) )
+        guidance   = float( data.get("guidance_scale",         9.0) )
+        cond_scale = float( data.get("controlnet_conditioning_scale", 1.2) )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Parametri numerici non validi")
+
+    # Seed per riproducibilità
     gen = torch.Generator(device="cuda").manual_seed(1234)
 
-    result = pipe(
-        prompt=prompt,
-        negative_prompt=negative_prompt, # prompo negativi non modificabili dal utente
-        image=guide,
-        num_inference_steps=int(data.get("num_inference_steps", 80)),
-        guidance_scale=float(data.get("guidance_scale", 9.0)),
-        controlnet_conditioning_scale=float(data.get("controlnet_conditioning_scale", 1.2)),
-        generator=gen
-    )
-
+    # Esecuzione pipeline
+    try:
+        result = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image=guide,
+            num_inference_steps=steps,
+            guidance_scale=guidance,
+            controlnet_conditioning_scale=cond_scale,
+            generator=gen
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Errore generazione IA: {e}")
 
     # Codifica il risultato in base64
     output_io = io.BytesIO()
     result.images[0].save(output_io, format="PNG")
     img_base64 = base64.b64encode(output_io.getvalue()).decode("utf-8")
+
     return {"image": f"data:image/png;base64,{img_base64}"}
+
