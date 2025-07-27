@@ -738,19 +738,22 @@ def _get_data_class_from_module(module):
 
 
 class TrainDataset(torch.utils.data.Dataset):
-    def __init__(self, args, tokenizers, accelerator):
+    def __init__(self, args, tokenizers, accelerator=None):
         self.args = args
         self.tokenizers = tokenizers
+        self.accelerator = accelerator
         
         # Get the datasets: you can either provide your own training and evaluation files (see below)
         # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
         
         if args.dataset_script_path is not None and _is_py_script(args.dataset_script_path):
             self.dataset = _get_data_class_from_module(
-                _import_module_from_path(
-                    "custom_dataset", 
-                    args.dataset_script_path)
-            )(args=args, tokenizers=tokenizers)
+                _import_module_from_path("custom_dataset", args.dataset_script_path)
+            )(
+                args=args,
+                tokenizers=tokenizers,
+                accelerator=accelerator
+            )
             return
         
         # In distributed training, the load_dataset function guarantees that only one local process can concurrently
@@ -917,38 +920,48 @@ def collate_fn(examples):
     conditioning_pixel_values = conditioning_pixel_values.to(memory_format=torch.contiguous_format).float()
 
     input_ids = torch.stack([example["input_ids"] for example in examples])
-    input_ids2 = torch.stack([example["input_ids2"] for example in examples])
+    #input_ids2 = torch.stack([example["input_ids2"] for example in examples]) LO RIMUOVO PERCHE' HO SOLO UN PROMPT
 
-    time_ids = torch.stack([example["time_ids"] for example in examples])
+    #time_ids = torch.stack([example["time_ids"] for example in examples]) NON LO IMPLEMENTO
 
     return {
         "pixel_values": pixel_values,
         "conditioning_pixel_values": conditioning_pixel_values,
         "input_ids": input_ids,
-        "input_ids2": input_ids2,
-        "time_ids": time_ids,
+        #"input_ids2": input_ids2, LO RIMUOVO PERCHE' HO SOLO UN PROMPT
+        #"time_ids": time_ids, NON LO IMPLEMENTO
     }
 
 
 def encode_prompt(text_encoders, text_input_ids_list):
-    prompt_embeds_list = []
+    #prompt_embeds_list = []
+    
+    #for i, text_encoder in enumerate(text_encoders):
+    #    text_input_ids = text_input_ids_list[i]
+    
+    #    prompt_embeds = text_encoder(
+    #        text_input_ids.to(text_encoder.device), output_hidden_states=True, return_dict=False
+    #    )
 
-    for i, text_encoder in enumerate(text_encoders):
-        text_input_ids = text_input_ids_list[i]
-
-        prompt_embeds = text_encoder(
-            text_input_ids.to(text_encoder.device), output_hidden_states=True, return_dict=False
+    #    # We are only ALWAYS interested in the pooled output of the final text encoder
+    #    pooled_prompt_embeds = prompt_embeds[0]
+    #    prompt_embeds = prompt_embeds[-1][-2]
+    #    bs_embed, seq_len, _ = prompt_embeds.shape
+    #    prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
+    #    prompt_embeds_list.append(prompt_embeds)
+    
+    # ora costruisco dinamicamente
+    prompt_embeds = []
+    pooled_prompt_embeds = []
+    for text_input_ids in text_input_ids_list:
+        # esegui la codifica
+        outputs = text_encoder(
+            input_ids=text_input_ids,
+            attention_mask=(text_input_ids != text_encoder.config.pad_token_id),
+            return_dict=True,
         )
-
-        # We are only ALWAYS interested in the pooled output of the final text encoder
-        pooled_prompt_embeds = prompt_embeds[0]
-        prompt_embeds = prompt_embeds[-1][-2]
-        bs_embed, seq_len, _ = prompt_embeds.shape
-        prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
-        prompt_embeds_list.append(prompt_embeds)
-
-    prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)
-    pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1)
+        prompt_embeds.append(outputs.last_hidden_state)
+        pooled_prompt_embeds.append(outputs.pooler_output)
     return prompt_embeds, pooled_prompt_embeds
 
 
@@ -1352,12 +1365,15 @@ def main(args):
                 control_latents = vae.encode(control_lora_v3_image).latent_dist.sample()
                 control_latents = control_latents * vae.config.scaling_factor
 
-                unet_added_conditions = {"time_ids": batch["time_ids"].to(latents.device)}
+                #unet_added_conditions = {"time_ids": batch["time_ids"].to(latents.device)}
+                # rimosso uso di time_ids
+                unet_added_conditions = {}
 
                 # Get the text embedding for conditioning
                 prompt_embeds, pooled_prompt_embeds = encode_prompt(
                     text_encoders=text_encoders,
-                    text_input_ids_list=[batch["input_ids"], batch["input_ids2"]],
+                    #text_input_ids_list = [batch["input_ids"], batch["input_ids2"]],
+                    text_input_ids_list = [batch["input_ids"]]
                 )
                 unet_added_conditions.update({"text_embeds": pooled_prompt_embeds})
 
