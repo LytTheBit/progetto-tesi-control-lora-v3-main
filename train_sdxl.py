@@ -920,49 +920,33 @@ def collate_fn(examples):
     conditioning_pixel_values = conditioning_pixel_values.to(memory_format=torch.contiguous_format).float()
 
     input_ids = torch.stack([example["input_ids"] for example in examples])
-    #input_ids2 = torch.stack([example["input_ids2"] for example in examples]) LO RIMUOVO PERCHE' HO SOLO UN PROMPT
-
-    #time_ids = torch.stack([example["time_ids"] for example in examples]) NON LO IMPLEMENTO
 
     return {
         "pixel_values": pixel_values,
         "conditioning_pixel_values": conditioning_pixel_values,
         "input_ids": input_ids,
-        #"input_ids2": input_ids2, LO RIMUOVO PERCHE' HO SOLO UN PROMPT
-        #"time_ids": time_ids, NON LO IMPLEMENTO
     }
 
 
 def encode_prompt(text_encoders, text_input_ids_list):
-    #prompt_embeds_list = []
-    
-    #for i, text_encoder in enumerate(text_encoders):
-    #    text_input_ids = text_input_ids_list[i]
-    
-    #    prompt_embeds = text_encoder(
-    #        text_input_ids.to(text_encoder.device), output_hidden_states=True, return_dict=False
-    #    )
-
-    #    # We are only ALWAYS interested in the pooled output of the final text encoder
-    #    pooled_prompt_embeds = prompt_embeds[0]
-    #    prompt_embeds = prompt_embeds[-1][-2]
-    #    bs_embed, seq_len, _ = prompt_embeds.shape
-    #    prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
-    #    prompt_embeds_list.append(prompt_embeds)
-    
-    # ora costruisco dinamicamente
-    prompt_embeds = []
-    pooled_prompt_embeds = []
-    for text_input_ids in text_input_ids_list:
-        # esegui la codifica
-        outputs = text_encoder(
-            input_ids=text_input_ids,
-            attention_mask=(text_input_ids != text_encoder.config.pad_token_id),
+    prompt_embs = []
+    pooled_embs = []
+    # per ciascun encoder, calcola last_hidden_state e pooled embedding
+    for encoder, ids in zip(text_encoders, text_input_ids_list):
+        outputs = encoder(
+            input_ids=ids.to(encoder.device),
+            attention_mask=(ids != encoder.config.pad_token_id),
             return_dict=True,
         )
-        prompt_embeds.append(outputs.last_hidden_state)
-        pooled_prompt_embeds.append(outputs.pooler_output)
+        prompt_embs.append(outputs.last_hidden_state)
+        pooled = outputs.pooler_output if hasattr(outputs, "pooler_output") else outputs.last_hidden_state[:, 0, :]
+        pooled_embs.append(pooled)
+    # SDXL: il secondo text_encoder fornisce direttamente il context per la cross-attn
+    prompt_embeds = prompt_embs[1]  # Tensor [B, seq_len, C_enc]
+    # uniamo i due pooled embedding in un solo vettore
+    pooled_prompt_embeds = torch.cat(pooled_embs, dim=-1)
     return prompt_embeds, pooled_prompt_embeds
+    
 
 
 def main(args):
@@ -1366,23 +1350,46 @@ def main(args):
                 control_latents = control_latents * vae.config.scaling_factor
 
                 #unet_added_conditions = {"time_ids": batch["time_ids"].to(latents.device)}
-                # rimosso uso di time_ids
-                unet_added_conditions = {}
 
-                # Get the text embedding for conditioning
+                # ricava i conditional + unconditioned IDs
+                cond_ids   = batch["input_ids"]
+                uncond_ids = torch.full_like(
+                    cond_ids, 
+                    fill_value=tokenizers[0].pad_token_id
+                ).to(cond_ids.device)
+ 
+                # genera gli embeddings (uncond + cond)
                 prompt_embeds, pooled_prompt_embeds = encode_prompt(
-                    text_encoders=text_encoders,
-                    #text_input_ids_list = [batch["input_ids"], batch["input_ids2"]],
-                    text_input_ids_list = [batch["input_ids"]]
+                    text_encoders,
+                    [uncond_ids, cond_ids]
                 )
-                unet_added_conditions.update({"text_embeds": pooled_prompt_embeds})
+
+                # calcola time_ids on‐the‐fly: [res,res,0,0,res,res]
+                bs = cond_ids.shape[0]
+                add_time_ids = [args.resolution, args.resolution, 0, 0, args.resolution, args.resolution]
+                time_ids = torch.tensor(add_time_ids, device=latents.device).unsqueeze(0).repeat(bs, 1)
+                
+                # pooled_prompt_embeds è già un Tensor [batch_size, hidden1+hidden2]
+                # ricava solo la porzione corrispondente al secondo encoder
+                hidden1 = text_encoders[0].config.hidden_size
+                text_added_cond = pooled_prompt_embeds[:, hidden1:]
+
+
+                
+                unet_added_conditions = {
+                    "time_ids": time_ids,
+                    "text_embeds": text_added_cond
+                }
+
+
+
 
                 # Predict the noise residual
                 model_pred = unet(
                     noisy_latents,
                     timesteps,
-                    prompt_embeds,
-                    added_cond_kwargs=unet_added_conditions,
+                    prompt_embeds,                # passaggio esplicito del tensor 3-D
+                    added_cond_kwargs={"time_ids": time_ids},  # qui vanno solo le altre condizioni
                     extra_conditions=control_latents,
                     return_dict=False,
                 )[0]
