@@ -16,14 +16,16 @@ from diffusers import UniPCMultistepScheduler
 
 # 3) Carica l'UNet con canny
 unet = UNet2DConditionModelEx.from_pretrained(
-    "runwayml/stable-diffusion-v1-5",
+    "stabilityai/stable-diffusion-2-1-base",
+    #"SG161222/Realistic_Vision_V4.0_noVAE",
     subfolder="unet",
     torch_dtype=torch.float16
 ).add_extra_conditions(["canny"])
 
 # 4) Pipeline ControlLoRA-v3
 pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5",
+    "stabilityai/stable-diffusion-2-1-base",
+    #"SG161222/Realistic_Vision_V4.0_noVAE",
     unet=unet,
     torch_dtype=torch.float16,
     safety_checker=None
@@ -33,7 +35,7 @@ pipe.to("cuda")
 
 # 5) Pesi LoRA “bicchieri”
 lora_ckpt = os.path.join(
-    project_root, "out", "lora-glasses", "checkpoint-5000", "pytorch_lora_weights.safetensors"
+    project_root, "out", "lora-glasses-test-stable-diffusion-2-1", "checkpoint-3000", "pytorch_lora_weights.safetensors"
 )
 if not os.path.isfile(lora_ckpt):
     raise FileNotFoundError(f"LoRA checkpoint non trovato: {lora_ckpt}")
@@ -43,16 +45,16 @@ pipe.load_lora_weights(lora_ckpt)
 guide_path = os.path.join(project_root, "glasses_data", "guide", "acqua-aurum.png")
 guide = Image.open(guide_path).convert("RGB").resize((512, 512))
 
-prompt = "realistic transparent glass tumbler with curved silhouette and narrow base, subtle pink tint, isolated on a clean white background, product photography style, studio lighting, sharp detail, no reflections"
-negative_prompt = "cartoon, sketch, distorted, colored background, reflections, ornate, decorative glass, textured sides, blurry, surreal"
+prompt = "transparent tapered drinking glass with curved silhouette and narrow base, isolated on white background, no shadows"
+negative_prompt = "deformed, distorted, sketch, blurry, cartoon, colored background"
 seed = 1234
-num_inference_steps = 250 # Numero di step della catena di denoising. Più è alto, più a lungo il modello "pulisce" l'immagine
-guidance_scale = 15.0 # Bilancia il peso tra il prompt testuale e la creatività del modello
-controlnet_conditioning_scale = 1.5 # Controlla quanto peso ha l’immagine guida fornita al ControlNet.
+num_inference_steps = 500 # Numero di step della catena di denoising. Più è alto, più a lungo il modello "pulisce" l'immagine
+guidance_scale = 10.0 # Bilancia il peso tra il prompt testuale e la creatività del modello
+controlnet_conditioning_scale = 0.5 # Controlla quanto peso ha l’immagine guida fornita al ControlNet.
 
 
 # 7) Generazione
-out_dir = os.path.join(project_root, "out", "test_glasses")
+out_dir = os.path.join(project_root, "out", "test_glasses-RV")
 os.makedirs(out_dir, exist_ok=True)
 gen = torch.Generator(device="cuda").manual_seed(seed)
 
@@ -100,7 +102,8 @@ settings = {
     "num_inference_steps": num_inference_steps,
     "guidance_scale": guidance_scale,
     "controlnet_conditioning_scale": controlnet_conditioning_scale,
-    "seed": seed
+    "seed": seed,
+    "training_checkpoint": lora_ckpt
 }
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=4)

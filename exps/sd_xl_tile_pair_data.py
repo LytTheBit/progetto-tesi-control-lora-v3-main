@@ -9,38 +9,44 @@ from PIL import Image, ImageFilter
 from datasets import load_dataset
 from torchvision import transforms
 from accelerate.logging import get_logger
-from datasets import load_dataset, DatasetDict  # aggiunto da me
 
 logger = get_logger(__name__)
 
 
 class TrainDataset(torch.utils.data.Dataset):
-    def __init__(self, args, tokenizer):
-        # 1) Definiamo dove sta il dataset
-        self.data_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__),
-                         "../glasses_data")
-        )
-        self.args = copy.deepcopy(args)
-        self.tokenizer = tokenizer
+    def __init__(self, args, tokenizers, accelerator=None):  # Cambiato: accetta tokenizers (plurale) e accelerator
+        args = copy.deepcopy(args)
+        args.dataset_name = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../../data/sd-generated", "sd1_5_pair_data"))
 
-        # 2) Carichiamo il CSV locale
-        data_files = {"train": os.path.join(self.data_dir, "captions.csv")}
-        dataset = load_dataset("csv",
-                               data_files=data_files,
-                               cache_dir=self.args.cache_dir)
+        self.args = args
 
-        # 3) Aggiungiamo i path di image e guide
-        def add_images(ex):
-            ex["image"] = os.path.join(self.data_dir, "image", ex["file"])
-            ex["guide"] = os.path.join(self.data_dir, "guide", ex["file"])
-            return ex
+        # Gestisce sia tokenizer singolo che multipli
+        if isinstance(tokenizers, (list, tuple)):
+            self.tokenizer = tokenizers[0]  # Usa il primo tokenizer se ce ne sono multipli
+        else:
+            self.tokenizer = tokenizers
 
-        dataset = dataset["train"].map(
-            add_images,
-            remove_columns=[],
-        )
-        dataset = DatasetDict({"train": dataset})
+        # Get the datasets: you can either provide your own training and evaluation files (see below)
+        # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
+
+        # In distributed training, the load_dataset function guarantees that only one local process can concurrently
+        # download the dataset.
+        if args.dataset_name is not None:
+            # Downloading and loading a dataset from the hub.
+            dataset = load_dataset(
+                args.dataset_name,
+                args.dataset_config_name,
+                cache_dir=args.cache_dir,
+            )
+        else:
+            if args.train_data_dir is not None:
+                dataset = load_dataset(
+                    args.train_data_dir,
+                    cache_dir=args.cache_dir,
+                )
+            # See more about loading custom images at
+            # https://huggingface.co/docs/datasets/v2.0.0/en/dataset_script
 
         # Preprocessing the datasets.
         # We need to tokenize inputs and targets.
@@ -105,7 +111,7 @@ class TrainDataset(torch.utils.data.Dataset):
     def tokenize_captions(self, examples, is_train=True):
         captions = []
         for caption in examples[self.caption_column]:
-            if random.random() < self.args.proportion_empty_prompts:
+            if hasattr(self.args, 'proportion_empty_prompts') and random.random() < self.args.proportion_empty_prompts:
                 captions.append("")
             elif isinstance(caption, str):
                 captions.append(caption)
@@ -152,10 +158,10 @@ class TrainDataset(torch.utils.data.Dataset):
         random_code = np.random.randint(0, 5)
         if random_code == 0:
             res = 2 ** np.random.randint(3, int(np.log2(args.resolution)))
-            image = image.resize((res, res), resample=Image.NEAREST)
+            image = image.resize((res, res), resample=Image.Resampling.NEAREST)
         elif random_code == 1:
             res = 2 ** np.random.randint(3, int(np.log2(args.resolution)))
-            image = image.resize((res, res), resample=Image.BILINEAR)
+            image = image.resize((res, res), resample=Image.Resampling.BILINEAR)
         elif random_code == 2:
             image = image.filter(ImageFilter.GaussianBlur(radius=np.random.randint(5, 11)))
         elif random_code == 3:
@@ -165,7 +171,7 @@ class TrainDataset(torch.utils.data.Dataset):
             image = ((image + 1) * 127.5).clip(0, 255).astype(np.uint8)
             image = Image.fromarray(image)
         elif random_code == 4:
-            image = image.resize((args.resolution // 2, args.resolution // 2), resample=Image.NEAREST)
+            image = image.resize((args.resolution // 2, args.resolution // 2), resample=Image.Resampling.NEAREST)
 
         return image
 
