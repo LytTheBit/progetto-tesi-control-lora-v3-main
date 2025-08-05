@@ -35,8 +35,8 @@ pipe.to("cuda")
 
 # 5) Pesi LoRA “bicchieri”
 lora_ckpt = os.path.join(
-    #project_root, "out", "lora-glasses-test-stable-diffusion-2-1", "checkpoint-3000", "pytorch_lora_weights.safetensors"
-    project_root, "out", "lora-glasses-test-realistic-vision-4-0", "checkpoint-3000", "pytorch_lora_weights.safetensors"
+    #project_root, "out", "lora-glasses-test-stable-diffusion-2-1", "lora-glasses-realistic-vision", "pytorch_lora_weights.safetensors"
+    project_root, "out", "lora-glasses-test-realistic-vision-4-0", "lora-glasses-realistic-vision", "pytorch_lora_weights.safetensors"
 )
 if not os.path.isfile(lora_ckpt):
     raise FileNotFoundError(f"LoRA checkpoint non trovato: {lora_ckpt}")

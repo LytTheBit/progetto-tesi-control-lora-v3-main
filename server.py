@@ -35,7 +35,7 @@ pipe.to("cuda")
 
 lora_ckpt = os.path.join(
     project_root,
-    "out", "lora-glasses", "checkpoint-5000", "pytorch_lora_weights.safetensors"
+    "out", "lora-glasses", "lora-glasses-base", "pytorch_lora_weights.safetensors"
 )
 pipe.load_lora_weights(lora_ckpt)
 

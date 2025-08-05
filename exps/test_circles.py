@@ -32,9 +32,9 @@ pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 pipe.to("cuda")
 
-# 5) Carica i pesi LoRA dal checkpoint-5000
+# 5) Carica i pesi LoRA dal lora-glasses-base
 lora_ckpt = os.path.join(
-    project_root, "out", "lora-circles", "checkpoint-5000", "pytorch_lora_weights.safetensors"
+    project_root, "out", "lora-circles", "lora-glasses-base", "pytorch_lora_weights.safetensors"
 )
 if not os.path.isfile(lora_ckpt):
     raise FileNotFoundError(f"LoRA checkpoint non trovato: {lora_ckpt}")

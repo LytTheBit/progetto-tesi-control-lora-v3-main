@@ -1,7 +1,9 @@
-import os, sys
+import os
+import sys
 import torch
 import json
 from PIL import Image
+from itertools import product
 
 # 1) Root del repo
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -29,11 +31,12 @@ pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
 )
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 pipe.to("cuda")
+pipe.set_progress_bar_config(disable=True)
 
 # 5) Pesi LoRA “bicchieri”
 lora_ckpt = os.path.join(
     project_root, "out", "lora-glasses-test-realistic-vision-4-0",
-    "checkpoint-3000", "pytorch_lora_weights.safetensors"
+    "lora-glasses-realistic-vision", "pytorch_lora_weights.safetensors"
 )
 if not os.path.isfile(lora_ckpt):
     raise FileNotFoundError(f"LoRA checkpoint non trovato: {lora_ckpt}")
@@ -48,50 +51,59 @@ negative_prompt = "deformed, distorted, sketch, blurry, cartoon, colored backgro
 seed = 1234
 gen = torch.Generator(device="cuda").manual_seed(seed)
 
-# 7) Imposta le variazioni
-guidance_values = [5.0 + 2.5 * i for i in range(int((30.0 - 5.0) / 2.5) + 1)]
-steps_values    = list(range(150, 801, 50))
-cond_values     = [i * 0.1 for i in range(0, 16)]  # da 0.0 a 1.5 passo 0.1
+# 7) Nuove variazioni
+guidance_values = [5.0 + 5 * i for i in range(int((30.0 - 5.0) / 5) + 1)]  # [5,10,…,30]
+steps_values    = list(range(150, 751, 75))                                 # [150,225,…,750]
+cond_values     = [i * 0.1 for i in range(0, 11)]                           # [0.0,0.1,…,1.0]
 
 # 8) Cartella unica di output
-out_dir = os.path.join(project_root, "out", "all_tests")
+out_dir = os.path.join(project_root, "out", "tests-realistic-vision-4-0")
 os.makedirs(out_dir, exist_ok=True)
 
-for guidance_scale in guidance_values:
-    for num_inference_steps in steps_values:
-        for extra_condition_scale in cond_values:
-            # nome base senza decimali superflui
-            base = f"test-{guidance_scale:.1f}-{num_inference_steps}-{extra_condition_scale:.1f}"
-            img_path = os.path.join(out_dir, f"{base}.png")
-            cfg_path = os.path.join(out_dir, f"{base}_settings.json")
+# 9) Prepara contatore e raccolta settings
+total = len(guidance_values) * len(steps_values) * len(cond_values)
+counter = 0
+all_settings = []
 
-            # 9) Generazione
-            result = pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                image=guide,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                extra_condition_scale=extra_condition_scale,
-                generator=gen
-            )
+for guidance_scale, num_inference_steps, extra_condition_scale in product(
+        guidance_values, steps_values, cond_values):
 
-            # 10) Salvataggio immagine
-            result.images[0].save(img_path)
+    counter += 1
+    remaining = total - counter
+    print(f"[{counter}/{total}] Generazione immagine: "
+          f"guidance={guidance_scale:.1f}, steps={num_inference_steps}, "
+          f"cond_scale={extra_condition_scale:.1f} (mancano {remaining})")
 
-            # 11) Salvataggio impostazioni
-            settings = {
-                "output_filename": f"{base}.png",
-                "prompt": prompt,
-                "negative_prompt": negative_prompt,
-                "guide_image": guide_path,
-                "num_inference_steps": num_inference_steps,
-                "guidance_scale": guidance_scale,
-                "condition_scale": extra_condition_scale,
-                "seed": seed,
-                "training_checkpoint": lora_ckpt
-            }
-            with open(cfg_path, "w") as f:
-                json.dump(settings, f, indent=4)
+    # 10) Generazione
+    result = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        image=guide,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        extra_condition_scale=extra_condition_scale,
+        generator=gen
+    )
 
-            print(f"✅ Salvato: {img_path}")
+    # 11) Salvataggio immagine
+    base = f"test-{guidance_scale:.0f}-{num_inference_steps}-{extra_condition_scale:.1f}"
+    img_path = os.path.join(out_dir, f"{base}.png")
+    result.images[0].save(img_path)
+    #   print(f"✅ Salvato: {img_path}")
+
+    # 12) Accumula impostazioni
+    all_settings.append({
+        "output_filename": f"{base}.png",
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "num_inference_steps": num_inference_steps,
+        "guidance_scale": guidance_scale,
+        "condition_scale": extra_condition_scale,
+        "training_checkpoint": lora_ckpt
+    })
+
+# 13) Salva in un unico JSON
+settings_file = os.path.join(out_dir, "all_settings.json")
+with open(settings_file, "w") as f:
+    json.dump(all_settings, f, indent=4)
+print(f"Tutte le impostazioni salvate in: {settings_file}")
