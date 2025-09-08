@@ -54,7 +54,7 @@ async def generate(request: Request):
     if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
         pipe.unload_lora_weights()  # Reset completo dei LoRA
 
-    pipe.load_lora_weights(lora_path, adapter_name="current")  # Puoi usare sempre lo stesso nome
+    #pipe.load_lora_weights(lora_path, adapter_name="current")  # Puoi usare sempre lo stesso nome
 
     # --- Prompts ---
     prompt = data.get("prompt", "").strip()
@@ -76,11 +76,16 @@ async def generate(request: Request):
         raise HTTPException(status_code=400, detail="Errore decodifica Canny")
     guide = Image.open(io.BytesIO(canny_bytes)).convert("RGB").resize((512, 512))
 
-    # --- Parametri numerici ---
+    # --- Ricarica LoRA per "current" (necessario per evitare errori con più richieste) ---
+    if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
+        pipe.unload_lora_weights()
+    pipe.load_lora_weights(lora_path)  # oppure: pipe.load_lora_weights(lora_path, adapter_name="canny")
+
+    # --- Parametri numerici --- adapter_name="current"
     try:
-        steps        = int( data.get("num_inference_steps", 80) )
-        guidance     = float( data.get("guidance_scale",        9.0) )
-        extra_scale  = float( data.get("extra_condition_scale",  1.2) )
+        steps        = int( data.get("num_inference_steps", 150) )
+        guidance     = float( data.get("guidance_scale", 20) )
+        extra = float(data.get("extra_condition_scale", 0.6))
     except ValueError:
         raise HTTPException(status_code=400, detail="Parametri numerici non validi")
 
@@ -95,11 +100,14 @@ async def generate(request: Request):
             image=guide,
             num_inference_steps=steps,
             guidance_scale=guidance,
-            extra_condition_scale=extra_scale,
+            extra_condition_scale=extra,
+
             generator=gen
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Errore generazione IA: {e}")
+
+    print(f"[DEBUG] steps={steps} guidance={guidance} extra={extra_scale}") # Log per debug
 
     # --- Ritorna PNG in base64 ---
     output_io = io.BytesIO()
