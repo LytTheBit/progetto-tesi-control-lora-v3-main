@@ -107,7 +107,7 @@ async def generate(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Errore generazione IA: {e}")
 
-    print(f"[DEBUG] steps={steps} guidance={guidance} extra={extra_scale}") # Log per debug
+    print(f"[DEBUG] steps={steps} guidance={guidance} extra={extra}") # Log per debug
 
     # --- Ritorna PNG in base64 ---
     output_io = io.BytesIO()
