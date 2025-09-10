@@ -11,6 +11,12 @@ os.chdir(project_root)
 import sys
 sys.path.insert(0, project_root)
 
+# Cartella MEDIA del sito (di default punta al progetto Django in locale)
+LORA_DIR = os.environ.get(
+    "LORA_DIR",
+    os.path.normpath(os.path.join(project_root, "..", "Design_maker_online", "media"))
+)
+
 # 2. Import pipeline IA
 from model import UNet2DConditionModelEx
 from pipeline import StableDiffusionControlLoraV3Pipeline
@@ -43,18 +49,29 @@ app = FastAPI()
 async def generate(request: Request):
     data = await request.json()
 
-    # --- Estrai modello e carica il relativo LoRA ---
-    model_name = data.get("model")
-    if not model_name:
-        raise HTTPException(status_code=400, detail="Parametro 'model' mancante")
-    lora_path = os.path.join(project_root, "modelli", model_name, "pytorch_lora_weights.safetensors")
+    # --- Risolvi il path del LoRA dal MEDIA del sito ---
+    rel_path = data.get("model_file")  # es. "lora/xxx.safetensors" da Django
+    if not rel_path:
+        # Fallback: se non arriva model_file, prova a costruirlo dal nome
+        model_name = data.get("model")
+        if not model_name:
+            raise HTTPException(status_code=400, detail="Parametro 'model' o 'model_file' mancante")
+        rel_path = f"lora/{model_name}.safetensors"
+
+    lora_path = os.path.normpath(os.path.join(LORA_DIR, rel_path))
     if not os.path.isfile(lora_path):
-        raise HTTPException(status_code=400, detail=f"Modello '{model_name}' non trovato in modelli/")
+        raise HTTPException(status_code=400, detail=f"LoRA non trovato: {lora_path}")
+
     # Rimuove adapter già presenti (necessario per evitare errori "already in use")
     if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
         pipe.unload_lora_weights()  # Reset completo dei LoRA
+    try:
+        pipe.load_lora_weights(lora_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Errore nel caricamento LoRA: {e}")
 
-    #pipe.load_lora_weights(lora_path, adapter_name="current")  # Puoi usare sempre lo stesso nome
+    print(f"[DEBUG] LORA_DIR={LORA_DIR}")
+    print(f"[DEBUG] LoRA path: {lora_path}")
 
     # --- Prompts ---
     prompt = data.get("prompt", "").strip()
@@ -76,16 +93,11 @@ async def generate(request: Request):
         raise HTTPException(status_code=400, detail="Errore decodifica Canny")
     guide = Image.open(io.BytesIO(canny_bytes)).convert("RGB").resize((512, 512))
 
-    # --- Ricarica LoRA per "current" (necessario per evitare errori con più richieste) ---
-    if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
-        pipe.unload_lora_weights()
-    pipe.load_lora_weights(lora_path)  # oppure: pipe.load_lora_weights(lora_path, adapter_name="canny")
-
-    # --- Parametri numerici --- adapter_name="current"
+    # --- Parametri numerici ---
     try:
-        steps        = int( data.get("num_inference_steps", 150) )
-        guidance     = float( data.get("guidance_scale", 20) )
-        extra = float(data.get("extra_condition_scale", 0.6))
+        steps    = int( data.get("num_inference_steps", 150) )
+        guidance = float( data.get("guidance_scale", 20) )
+        extra    = float( data.get("extra_condition_scale", 0.6) )
     except ValueError:
         raise HTTPException(status_code=400, detail="Parametri numerici non validi")
 
@@ -101,13 +113,12 @@ async def generate(request: Request):
             num_inference_steps=steps,
             guidance_scale=guidance,
             extra_condition_scale=extra,
-
             generator=gen
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Errore generazione IA: {e}")
 
-    print(f"[DEBUG] steps={steps} guidance={guidance} extra={extra}") # Log per debug
+    print(f"[DEBUG] steps={steps} guidance={guidance} extra={extra}")  # Log per debug
 
     # --- Ritorna PNG in base64 ---
     output_io = io.BytesIO()
