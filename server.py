@@ -49,18 +49,23 @@ app = FastAPI()
 async def generate(request: Request):
     data = await request.json()
 
-    # --- Risolvi il path del LoRA dal MEDIA del sito ---
-    rel_path = data.get("model_file")  # es. "lora/xxx.safetensors" da Django
+    # --- Selezione LoRA ---
+    rel_path = data.get("model_file")
     if not rel_path:
-        # Fallback: se non arriva model_file, prova a costruirlo dal nome
         model_name = data.get("model")
         if not model_name:
             raise HTTPException(status_code=400, detail="Parametro 'model' o 'model_file' mancante")
         rel_path = f"lora/{model_name}.safetensors"
 
+    # --- Caricamento LoRA ---
     lora_path = os.path.normpath(os.path.join(LORA_DIR, rel_path))
+
     if not os.path.isfile(lora_path):
         raise HTTPException(status_code=400, detail=f"LoRA non trovato: {lora_path}")
+
+    print(f"[DEBUG] LORA_DIR={LORA_DIR}") # Debug
+    print(f"[DEBUG] Carico LoRA: {lora_path}") # Debug
+
 
     # Rimuove adapter già presenti (necessario per evitare errori "already in use")
     if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
