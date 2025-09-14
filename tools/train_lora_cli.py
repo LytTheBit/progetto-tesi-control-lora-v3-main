@@ -1,3 +1,5 @@
+# Simula un training di LoRA per testare l'integrazione con l'interfaccia web
+# Usa gli stessi argomenti della riga di comando definiti in settings.TRAIN_CMD
 import argparse, os, time, sys, pathlib
 
 def main():
