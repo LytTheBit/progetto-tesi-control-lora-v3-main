@@ -161,8 +161,21 @@ def main():
         global_step += 1
         print(f"step={global_step}", flush=True)
 
-    # salva i pesi LoRA (un unico .safetensors nella cartella di out)
-    pipe.save_lora_weights(args.out, weight_name="pytorch_lora_weights.safetensors")
+    # Salvataggio compatibile 0.25.x (AttnProcessor) e 0.26+ (LoRA layers)
+    try:
+        # diffusers >= 0.26 (LoRA layers)
+        pipe.save_lora_weights(args.out, weight_name="pytorch_lora_weights.safetensors")
+    except Exception:
+        # diffusers 0.25.x (AttnProcessor)
+        pipe.save_attn_procs(args.out, safe_serialization=True)
+        # normalizza il nome del file a quello atteso dal resto del progetto
+        import os, glob
+        target = os.path.join(args.out, "pytorch_lora_weights.safetensors")
+        if not os.path.exists(target):
+            cand = glob.glob(os.path.join(args.out, "*.safetensors"))
+            if cand:
+                os.replace(cand[0], target)
+
     print("done", flush=True)
 
 if __name__ == "__main__":
