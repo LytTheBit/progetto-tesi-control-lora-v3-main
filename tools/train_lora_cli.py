@@ -75,26 +75,39 @@ class ImageTextDataset(Dataset):
         return {"pixel_values": x, "input_ids": ids}
 
 def add_lora_to_unet(unet: nn.Module, rank: int):
-    # Sostituisce tutti i processor di attention con LoRA
+    """
+    Inietta LoRA in tutti i blocchi di attention dell'UNet.
+    Per i blocchi di cross-attention passiamo anche cross_attention_dim (tipicamente 768 in SD1.5),
+    così le LoRA su to_k/to_v hanno la shape corretta.
+    """
     loras = []
     for name, module in unet.named_modules():
-        if hasattr(module, "set_processor"):
-            proc = module.processor
-            hidden_size = None
-            try:
-                hidden_size = module.to_q.in_features
-            except Exception:
-                pass
-            if isinstance(proc, AttnProcessor2_0):
-                lora = LoRAAttnProcessor2_0(hidden_size=hidden_size, rank=rank)
-            else:
-                lora = LoRAAttnProcessor(hidden_size=hidden_size, rank=rank)
-            module.set_processor(lora)
-            loras.append(lora)
-    # restituisci parametri allenabili
-    params = []
-    for lp in loras:
-        params += list(lp.parameters())
+        if not hasattr(module, "set_processor") or not hasattr(module, "processor"):
+            continue
+
+        proc = module.processor
+
+        # hidden_size = dim di to_q; cross_dim = dim di to_k (se diversa da to_q -> cross-attn)
+        hidden_size = getattr(getattr(module, "to_q", None), "in_features", None)
+        k_in = getattr(getattr(module, "to_k", None), "in_features", None)
+        cross_dim = None
+        if hidden_size is not None and k_in is not None and k_in != hidden_size:
+            cross_dim = k_in  # es. 768 su SD1.5
+
+        if isinstance(proc, AttnProcessor2_0):
+            lora = LoRAAttnProcessor2_0(hidden_size=hidden_size,
+                                        cross_attention_dim=cross_dim,
+                                        rank=rank)
+        else:
+            lora = LoRAAttnProcessor(hidden_size=hidden_size,
+                                     cross_attention_dim=cross_dim,
+                                     rank=rank)
+
+        module.set_processor(lora)
+        loras.append(lora)
+
+    # restituisci i parametri allenabili
+    params = [p for lp in loras for p in lp.parameters()]
     return params
 
 def main():
