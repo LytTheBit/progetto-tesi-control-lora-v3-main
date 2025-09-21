@@ -1,0 +1,11 @@
+{
+    "output_filename": "bicchiere_0043.png",
+    "prompt": "transparent tapered drinking glass with curved silhouette and narrow base, isolated on white background, no shadows",
+    "negative_prompt": "deformed, distorted, sketch, blurry, cartoon, colored background",
+    "guide_image": "C:\\Users\\Utente\\OneDrive\\Documenti\\GitHub\\progetto-tesi-control-lora-v3-main\\glasses_data\\guide\\acqua-aurum.png",
+    "num_inference_steps": 500,
+    "guidance_scale": 10.0,
+    "controlnet_conditioning_scale": 0.5,
+    "seed": 1234,
+    "training_checkpoint": "C:\\Users\\Utente\\OneDrive\\Documenti\\GitHub\\progetto-tesi-control-lora-v3-main\\out\\lora-glasses-test-stable-diffusion-2-1\\checkpoint-3000\\pytorch_lora_weights.safetensors"
+}

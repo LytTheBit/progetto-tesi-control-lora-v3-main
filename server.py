@@ -45,7 +45,7 @@ pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
     safety_checker=None
 )
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-pipe.to("cuda")
+pipe.to("cpu")
 
 # (Opzionale) carica un LoRA di default all'avvio, per non lasciare la pipeline "vuota"
 default_ckpt = os.path.join(project_root, "modelli", "lora-glasses-base", "pytorch_lora_weights.safetensors")
