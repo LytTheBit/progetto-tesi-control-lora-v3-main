@@ -1,31 +1,28 @@
 import os
 import io
+import uuid
 import base64
 import torch
 from fastapi import FastAPI, Request, HTTPException
 from PIL import Image
+import traceback
 
 import asyncio, time, uuid, contextlib
 from typing import Any, Dict, Optional
 
 # Config runtime (override con env)
-QUEUE_MAXSIZE = int(os.environ.get("QUEUE_MAXSIZE", "32"))     # cap coda
+QUEUE_MAXSIZE = int(os.environ.get("QUEUE_MAXSIZE", "32"))  # cap coda
 WORKER_CONCURRENCY = int(os.environ.get("WORKER_CONCURRENCY", "1"))  # worker attivi (GPU=1)
-JOB_TIMEOUT_SEC = int(os.environ.get("JOB_TIMEOUT_SEC", "1200"))     # 20 min job
-WAIT_TIMEOUT_SEC = int(os.environ.get("WAIT_TIMEOUT_SEC", "900"))    # 15 min attesa endpoint
-
+JOB_TIMEOUT_SEC = int(os.environ.get("JOB_TIMEOUT_SEC", "1200"))  # 20 min job
+WAIT_TIMEOUT_SEC = int(os.environ.get("WAIT_TIMEOUT_SEC", "900"))  # 15 min attesa endpoint
 
 # 1. Imposta il path corretto e carica i moduli custom
 project_root = os.path.abspath(os.path.dirname(__file__))
 os.chdir(project_root)
 import sys
+
 sys.path.insert(0, project_root)
 
-# Cartella MEDIA del sito (di default punta al progetto Django in locale)
-LORA_DIR = os.environ.get(
-    "LORA_DIR",
-    os.path.normpath(os.path.join(project_root, "..", "Design_maker_online", "media"))
-)
 
 # 2. Import pipeline IA
 from model import UNet2DConditionModelEx
@@ -45,7 +42,7 @@ pipe = StableDiffusionControlLoraV3Pipeline.from_pretrained(
     safety_checker=None
 )
 pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-pipe.to("cpu")
+pipe.to("cuda")
 
 # (Opzionale) carica un LoRA di default all'avvio, per non lasciare la pipeline "vuota"
 default_ckpt = os.path.join(project_root, "modelli", "lora-glasses-base", "pytorch_lora_weights.safetensors")
@@ -55,17 +52,21 @@ if os.path.isfile(default_ckpt):
 # 4. FastAPI app
 app = FastAPI()
 
+
 # 5. Job queue e worker per serializzare le richieste
 class Job:
     __slots__ = ("id", "data", "future", "enqueued_at")
+
     def __init__(self, data: Dict[str, Any]):
         self.id = str(uuid.uuid4())
         self.data = data
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.enqueued_at = time.time()
 
+
 job_queue: asyncio.Queue[Job] = asyncio.Queue(maxsize=QUEUE_MAXSIZE)
 jobs_registry: Dict[str, Dict[str, Any]] = {}
+
 
 # Funzione di generazione IA
 async def worker_loop(worker_id: int):
@@ -78,21 +79,27 @@ async def worker_loop(worker_id: int):
                 jobs_registry[job.id].update({"status": "done", "ended_at": time.time()})
                 if not job.future.done():
                     job.future.set_result({"image": result, "job_id": job.id})
-        except asyncio.TimeoutError:
-            jobs_registry[job.id].update({"status": "timeout", "ended_at": time.time()})
-            if not job.future.done():
-                job.future.set_exception(HTTPException(status_code=504, detail="Timeout generazione"))
         except Exception as e:
+            # <<< MODIFICA: Stampa il traceback completo sulla console
+            print("--- INIZIO TRACEBACK ERRORE ---")
+            traceback.print_exc()
+            print("--- FINE TRACEBACK ERRORE ---")
+
             jobs_registry[job.id].update({"status": "error", "ended_at": time.time(), "error": str(e)})
             if not job.future.done():
-                job.future.set_exception(HTTPException(status_code=500, detail=f"Errore generazione: {e}"))
+                # Puoi anche passare un traceback più dettagliato al client, se vuoi (sconsigliato in produzione)
+                dettaglio_errore = f"{type(e).__name__}: {e}"
+                job.future.set_exception(
+                    HTTPException(status_code=500, detail=f"Errore generazione: {dettaglio_errore}"))
         finally:
             job_queue.task_done()
+
 
 # Wrapper per eseguire la generazione in un thread separato
 @app.on_event("startup")
 async def _startup():
     app.state.workers = [asyncio.create_task(worker_loop(i)) for i in range(WORKER_CONCURRENCY)]
+
 
 # Shutdown pulito
 @app.on_event("shutdown")
@@ -103,21 +110,62 @@ async def _shutdown():
         with contextlib.suppress(Exception):
             await t
 
+
 # Funzione di generazione sincrona (da eseguire in thread separato)
 def _run_generation_sync(data: Dict[str, Any]) -> str:
     # === COPIATA la tua logica dall’endpoint (validazioni incluse) ===
 
     # --- Selezione LoRA ---
-    rel_path = data.get("model_file")
-    if not rel_path:
-        model_name = data.get("model")
-        if not model_name:
-            raise HTTPException(status_code=400, detail="Parametro 'model' o 'model_file' mancante")
-        rel_path = f"lora/{model_name}.safetensors"
+    # rel_path = data.get("model_file")
+    # if not rel_path:
+    #     model_name = data.get("model")
+    #     if not model_name:
+    #         raise HTTPException(status_code=400, detail="Parametro 'model' o 'model_file' mancante")
+    #     rel_path = f"lora/{model_name}.safetensors"
+    #
+    # lora_path = os.path.normpath(os.path.join(LORA_DIR, rel_path))
+    # if not os.path.isfile(lora_path):
+    #     raise HTTPException(status_code=400, detail=f"LoRA non trovato: {lora_path}")
 
-    lora_path = os.path.normpath(os.path.join(LORA_DIR, rel_path))
-    if not os.path.isfile(lora_path):
-        raise HTTPException(status_code=400, detail=f"LoRA non trovato: {lora_path}")
+    rel_path = data.get("model_file")
+    model_data_b64 = data.get("model_file_b64")
+
+    try:
+        # 1. Decodifica i dati da Base64 a bytes
+        lora_bytes = base64.b64decode(model_data_b64)
+
+        # Percorso completo dove vuoi salvare il file
+        lora_path = os.path.normpath(os.path.join(project_root, "lora_dir", rel_path))
+
+        # --- PARTE DA AGGIUNGERE ---
+        # 1. Estrai il percorso della sola directory dal percorso completo del file
+        directory_del_file = os.path.dirname(lora_path)
+
+        # 2. Crea la directory (e tutte le cartelle "genitore" necessarie)
+        #    exist_ok=True evita un errore se la cartella esiste già.
+        os.makedirs(directory_del_file, exist_ok=True)
+        # -------------------------
+
+        # 3. Ora puoi scrivere il file con la certezza che la cartella esista
+        with open(lora_path, "wb") as f:
+            f.write(lora_bytes)
+
+        # 3. Reset + carico LoRA dal file temporaneo
+        if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
+            pipe.unload_lora_weights()
+
+        pipe.load_lora_weights(lora_path)  # Ora carica il file appena creato
+
+        # --- Il resto della funzione rimane quasi identico ---
+        # --- Prompt ---
+        prompt = data.get("prompt", "").strip()
+        # ... (tutto il resto del codice per canny, parametri, generazione, ecc.) ...
+
+    except Exception as e:
+        # Se si verifica un errore, assicurati che il traceback sia utile
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Errore durante la generazione: {type(e).__name__}: {e}")
 
     # Reset + carico LoRA
     if hasattr(pipe, "unet") and hasattr(pipe.unet, "attn_processors"):
@@ -149,9 +197,9 @@ def _run_generation_sync(data: Dict[str, Any]) -> str:
 
     # --- Parametri ---
     try:
-        steps    = int( data.get("num_inference_steps", 150) )
-        guidance = float( data.get("guidance_scale", 20) )
-        extra    = float( data.get("extra_condition_scale", 0.6) )
+        steps = int(data.get("num_inference_steps", 150))
+        guidance = float(data.get("guidance_scale", 20))
+        extra = float(data.get("extra_condition_scale", 0.6))
     except ValueError:
         raise HTTPException(status_code=400, detail="Parametri numerici non validi")
 
@@ -176,6 +224,7 @@ def _run_generation_sync(data: Dict[str, Any]) -> str:
     result.images[0].save(output_io, format="PNG")
     img_base64 = base64.b64encode(output_io.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{img_base64}"
+
 
 async def run_generation(data: Dict[str, Any]) -> str:
     # Sposta il lavoro bloccante fuori dall’event loop
@@ -210,6 +259,7 @@ async def job_status(job_id: str):
     if not info:
         raise HTTPException(status_code=404, detail="Job non trovato")
     return {"job_id": job_id, **info}
+
 
 # Endpoint di health check
 @app.get("/health")
